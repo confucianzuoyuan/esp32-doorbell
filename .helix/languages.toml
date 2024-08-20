@@ -1,0 +1,6 @@
+[[language]]
+name = "markdown"
+language-servers = ["buffer-language-server"] 
+
+[language-server.buffer-language-server]
+command = "buffer-language-server"
