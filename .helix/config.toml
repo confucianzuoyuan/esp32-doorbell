@@ -1,0 +1,5 @@
+[keys.normal]
+C-s = ":w"
+
+[keys.normal."+"]
+m = ":run-shell-command git add ."
