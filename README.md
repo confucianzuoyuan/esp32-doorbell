@@ -148,3 +148,5 @@ void *handle_client(void *arg) {
 > 源码位置在：`examples/protocols/http_server/simple`
 
 我们还是来实现一个简单的 GET 请求的 HTTP 服务器
+
+具体代码见本仓库的`esp32-simple-http-server`
