@@ -142,3 +142,9 @@ void *handle_client(void *arg) {
 ![](image/3.png)
 
 接下来，它读取文件内容并将其附加到响应缓冲区中。返回给 `handle_client()` 的响应缓冲区会被发送回客户端。我将 `BUFFER_SIZE` 设置为 1MB，这意味着服务器可以处理大小最多为 1MB 的任何 HTTP 响应。
+
+## 使用esp32实现一个简单的HTTP服务器
+
+> 源码位置在：`examples/protocols/http_server/simple`
+
+我们还是来实现一个简单的 GET 请求的 HTTP 服务器
