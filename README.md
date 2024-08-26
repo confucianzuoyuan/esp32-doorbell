@@ -186,6 +186,30 @@ void *handle_client(void *arg) {
 
 > 源码位置在 `examples/peripherals/i2s/i2s_codec/i2s_es8311`
 
+源码中需要修改的地方，有关I2C和I2S的引脚号需要修改一下。
+
+```c
+#define I2C_SCL_IO 1
+#define I2C_SDA_IO 0
+
+#define I2S_MCK_IO 3
+#define I2S_BCK_IO 2
+
+#define I2S_DO_IO 6
+#define I2S_DI_IO 4
+```
+
+还有使能引脚需要拉高。在 `app_main` 的最开始处添加以下代码：
+
+```c
+gpio_config_t io_conf = {};
+io_conf.intr_type = GPIO_INTR_DISABLE;
+io_conf.mode = GPIO_MODE_OUTPUT;
+io_conf.pin_bit_mask = (1ULL << 46);
+gpio_config(&io_conf);
+gpio_set_level(46, 1);
+```
+
 I2S（Inter-IC Sound，集成电路内置音频总线）是一种同步串行通信协议，通常用于在两个数字音频设备之间传输音频数据。
 
 ESP32 包含 2 个 I2S 外设。通过配置这些外设，可以借助 I2S 驱动来输入和输出采样数据。
