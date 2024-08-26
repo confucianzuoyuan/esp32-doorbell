@@ -232,3 +232,77 @@ ESP32 包含 2 个 I2S 外设。通过配置这些外设，可以借助 I2S 驱�
 ## 使用两个ESP32实现对讲机功能
 
 我们使用 udp 协议在两个ESP32之间传输数据。
+
+> 源码位置：examples/protocols/sockets/udp_client
+> 源码位置：examples/protocols/sockets/udp_server
+
+我们使用 ESP32 的主板作为 udp client 的一方。关键代码如下：
+
+```c
+static void udp_client_task(void *args) {
+    int addr_family = 0;
+    int ip_protocol = 0;
+
+    dest_addr.sin_addr.s_addr = inet_addr(HOST_IP_ADDR);
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_port = htons(PORT);
+    addr_family = AF_INET;
+    ip_protocol = IPPROTO_IP;
+
+    sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
+
+    struct timeval timeout;
+    timeout.tv_sec = 10;
+    timeout.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
+
+    uint8_t tx_buffer[1024];
+    size_t bytes_read = 0;
+    int sock;
+    struct sockaddr_in dest_addr;
+    struct sockaddr_storage source_addr;
+    socklen_t socklen = sizeof(source_addr);
+    
+    while (1) {
+        memset(tx_buffer, 0, 1024);
+        i2s_channel_read(rx_handle, tx_buffer, 1024, &bytes_read, 1000);
+        sendto(sock, tx_buffer, 1024, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+    }
+}
+```
+
+ESP32 的副板作为 udp server 来使用。rtos任务如下：
+
+```c
+static void udp_server_task(void* arg) {
+    uint8_t rx_buffer[1024];
+    int addr_family = AF_INET;
+    int ip_protocol = 0;
+    struct sockaddr_in6 dest_addr;
+
+    struct sockaddr_in *dest_addr_ip4 = (struct sockaddr_in *)&dest_addr;
+    dest_addr_ip4->sin_addr.s_addr = htonl(INADDR_ANY);
+    dest_addr_ip4->sin_family = AF_INET;
+    dest_addr_ip4->sin_port = htons(PORT);
+    ip_protocol = IPPROTO_IP;
+
+    int sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
+
+    struct timeval timeout;
+    timeout.tv_sec = 10;
+    timeout.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
+
+    bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+
+    struct sockaddr_storage source_addr;
+    socklen_t socklen = sizeof(source_addr);
+
+    uint8_t rx_buffer[1024];
+    size_t bytes_write;
+    while (1) {
+        recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
+        i2s_channel_write(tx_handle, rx_buffer, 1024, &bytes_write, 1000);
+    }
+}
+```
