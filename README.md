@@ -306,3 +306,7 @@ static void udp_server_task(void* arg) {
     }
 }
 ```
+
+## 使用两个ESP32通过蓝牙进行通信
+
+
