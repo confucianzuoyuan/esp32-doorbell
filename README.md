@@ -309,4 +309,24 @@ static void udp_server_task(void* arg) {
 
 ## 使用两个ESP32通过蓝牙进行通信
 
+主板向副板发送通知的关键代码如下
 
+```c
+void ble_send_notify_task(void* args) {
+    while (1) {
+        if (is_connect) {
+            esp_ble_gatts_send_indicate(
+                gl_profile_tab[PROFILE_A_APP_ID].gatts_if,
+                gl_profile_tab[PROFILE_A_APP_ID].conn_id,
+                gl_profile_tab[PROFILE_A_APP_ID].char_handle,
+                5,
+                (uint8_t*)"hello",
+                false
+            );
+        }
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+}
+```
+
+副板上面直接移植示例代码 `examples/bluetooth/bluedroid/ble/gatt_client` 中的代码即可。
