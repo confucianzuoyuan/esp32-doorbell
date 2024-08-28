@@ -670,3 +670,13 @@ PCMPlayer.prototype.flush = function() {
     </body>
 </html>
 ```
+
+## 使用ESP32搭建一个摄像头服务器
+
+创建一个新项目
+
+```sh
+$ idf.py create-project esp-doorbell-cam
+$ cd esp-doorbell-cam
+$ idf.py add-dependency esp32-camera
+```
