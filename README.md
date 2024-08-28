@@ -330,3 +330,343 @@ void ble_send_notify_task(void* args) {
 ```
 
 副板上面直接移植示例代码 `examples/bluetooth/bluedroid/ble/gatt_client` 中的代码即可。
+
+## 使用ESP32实现websocket服务器
+
+> 例程路径：`examples/protocols/http_server/ws_echo_server`
+
+当我们按下主板的按键时，我们说的话经过麦克风的采集变成数字信号，也就是一个数组，然后通过websocket将数组发送到浏览器，然后使用浏览器的api播放接收到的声音数据。
+
+关键代码如下：
+
+```c
+// 初始化一个websocket文件描述符
+static int ws_fd = 0;
+static uint8_t tx_buffer[8192] = {0};
+// 通过websocket发送数据的代码
+static void ws_async_send(void *arg) {
+    size_t bytes_read = 0;
+    memset(tx_buffer, 8192, 0);
+    // 读取麦克风的声音
+    i2s_channel_read(rx_handle, tx_buffer, 8192, &bytes_read, 1000);
+    // websocket数据包
+    httpd_ws_frame ws_pkt;
+    memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
+    ws_pkt.payload = tx_buffer;
+    ws_pkt.len = 8192;
+    ws_pkt.type = HTTPD_WS_TYPE_BINARY;
+
+    httpd_ws_send_frame_async(server, ws_fd, &ws_pkt);
+}
+
+// rtos任务
+static void ws_send_task(void *arg) {
+    while (1) {
+        // 检测到按下按键
+        if (gpio_get_level(45) == 1) {
+            // 将websocket发送方法加入到队列中，
+            // 实现websocket异步发送功能
+            httpd_queue_work(server, ws_async_send, NULL);
+        }
+        // 延时100ms, 这样可以将时间片空出来，
+        // 使得优先级更低的任务可以执行
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
+}
+```
+
+但我们不按下按键时，浏览器可以通过麦克风采集声音数据，然后通过websocket将声音数据发送到esp32主板，再使用esp32主板播放接收到的声音数据即可。
+
+这样我们就实现了浏览器和esp32主板的对讲功能。
+
+关键代码如下：
+
+```c
+static esp_err_t echo_handler(httpd_req_t *req) {
+    size_t bytes_write = 0;
+    if (req->method == HTTP_GET) {
+        // 当浏览器第一次连接时，会执行以下代码
+        // 将文件描述符保存下来
+        ws_fd = httpd_req_to_sockfd(req);
+        return ESP_OK;
+    }
+    httpd_ws_frame_t ws_pkt;
+    uint8_t *buf = NULL;
+    memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
+    ws_pkt.type = HTTPD_WS_TYPE_BINARY;
+    // 先将 max_len = 0 ，这样可以得到接收到的 frame 的长度
+    httpd_ws_recv_frame(req, &ws_pkt, 0);
+    // 如果接收到了数据
+    if (ws_pkt.len) {
+        buf = calloc(1, ws_pkt.len);
+        ws_pkt.payload = buf;
+        // 将 max_len = ws_pkt.len 来获取 frame 的数据 payload
+        httpd_ws_recv_frame(req, &ws_pkt, ws_pkt.len);
+        if (gpio_get_level(45) == 0) {
+            i2s_channel_write(tx_handle, ws_pkt.payload, ws_pkt.len, &bytes_write, 1000);
+        }
+    }
+    free(buf);
+    return 0;
+}
+```
+
+接下来我们看一下浏览器中的代码应该怎么写：
+
+`pcm-player.js`代码如下，用来在浏览器中播放声音数据
+
+```js
+function PCMPlayer(option) {
+    this.init(option);
+}
+
+PCMPlayer.prototype.init = function(option) {
+    var defaults = {
+        encoding: '16bitInt',
+        channels: 1,
+        sampleRate: 8000,
+        flushingTime: 1000
+    };
+    this.option = Object.assign({}, defaults, option);
+    this.samples = new Float32Array();
+    this.flush = this.flush.bind(this);
+    this.interval = setInterval(this.flush, this.option.flushingTime);
+    this.maxValue = this.getMaxValue();
+    this.typedArray = this.getTypedArray();
+    this.createContext();
+};
+
+PCMPlayer.prototype.getMaxValue = function () {
+    var encodings = {
+        '8bitInt': 128,
+        '16bitInt': 32768,
+        '32bitInt': 2147483648,
+        '32bitFloat': 1
+    }
+
+    return encodings[this.option.encoding] ? encodings[this.option.encoding] : encodings['16bitInt'];
+};
+
+PCMPlayer.prototype.getTypedArray = function () {
+    var typedArrays = {
+        '8bitInt': Int8Array,
+        '16bitInt': Int16Array,
+        '32bitInt': Int32Array,
+        '32bitFloat': Float32Array
+    }
+
+    return typedArrays[this.option.encoding] ? typedArrays[this.option.encoding] : typedArrays['16bitInt'];
+};
+
+PCMPlayer.prototype.createContext = function() {
+    this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    // context needs to be resumed on iOS and Safari (or it will stay in "suspended" state)
+    this.audioCtx.resume();
+    this.audioCtx.onstatechange = () => console.log(this.audioCtx.state);   // if you want to see "Running" state in console and be happy about it
+    
+    this.gainNode = this.audioCtx.createGain();
+    this.gainNode.gain.value = 1;
+    this.gainNode.connect(this.audioCtx.destination);
+    this.startTime = this.audioCtx.currentTime;
+};
+
+PCMPlayer.prototype.isTypedArray = function(data) {
+    return (data.byteLength && data.buffer && data.buffer.constructor == ArrayBuffer);
+};
+
+PCMPlayer.prototype.feed = function(data) {
+    if (!this.isTypedArray(data)) return;
+    data = this.getFormatedValue(data);
+    var tmp = new Float32Array(this.samples.length + data.length);
+    tmp.set(this.samples, 0);
+    tmp.set(data, this.samples.length);
+    this.samples = tmp;
+};
+
+PCMPlayer.prototype.getFormatedValue = function(data) {
+    var data = new this.typedArray(data.buffer),
+        float32 = new Float32Array(data.length),
+        i;
+
+    for (i = 0; i < data.length; i++) {
+        float32[i] = data[i] / this.maxValue;
+    }
+    return float32;
+};
+
+PCMPlayer.prototype.volume = function(volume) {
+    this.gainNode.gain.value = volume;
+};
+
+PCMPlayer.prototype.destroy = function() {
+    if (this.interval) {
+        clearInterval(this.interval);
+    }
+    this.samples = null;
+    this.audioCtx.close();
+    this.audioCtx = null;
+};
+
+PCMPlayer.prototype.flush = function() {
+    if (!this.samples.length) return;
+    var bufferSource = this.audioCtx.createBufferSource(),
+        length = this.samples.length / this.option.channels,
+        audioBuffer = this.audioCtx.createBuffer(this.option.channels, length, this.option.sampleRate),
+        audioData,
+        channel,
+        offset,
+        i,
+        decrement;
+
+    for (channel = 0; channel < this.option.channels; channel++) {
+        audioData = audioBuffer.getChannelData(channel);
+        offset = channel;
+        decrement = 50;
+        for (i = 0; i < length; i++) {
+            audioData[i] = this.samples[offset];
+            /* fadein */
+            if (i < 50) {
+                audioData[i] =  (audioData[i] * i) / 50;
+            }
+            /* fadeout*/
+            if (i >= (length - 51)) {
+                audioData[i] =  (audioData[i] * decrement--) / 50;
+            }
+            offset += this.option.channels;
+        }
+    }
+    
+    if (this.startTime < this.audioCtx.currentTime) {
+        this.startTime = this.audioCtx.currentTime;
+    }
+    console.log('start vs current '+this.startTime+' vs '+this.audioCtx.currentTime+' duration: '+audioBuffer.duration);
+    bufferSource.buffer = audioBuffer;
+    bufferSource.connect(this.gainNode);
+    bufferSource.start(this.startTime);
+    this.startTime += audioBuffer.duration;
+    this.samples = new Float32Array();
+};
+```
+
+`main.html` 如下：
+
+```html
+<html>
+    <head>
+        <script src='pcm-player.js'></script>
+    </head>
+    <script>
+        // websocket地址
+        let websocket_url = 'ws://172.20.10.5:80/ws';
+        let bufferSize = 8192,
+            AudioContext,
+            context,
+            processor,
+            input,
+            globalStream,
+            websocket;
+
+        // 初始化浏览器的websocket
+        initWebSocket();
+
+        let player = new PCMPlayer({
+            encoding: '16bitInt',
+            channels: 1,
+            sampleRate: 32000,
+            flushingTime: 2000
+        });
+
+        // 通过浏览器的麦克风api采集声音
+        function startRecording() {
+            streamStreaming = true;
+            AudioContext = window.AudioContext || window.webkitAudioContext;
+            context = new AudioContext({
+                latencyHint: 'interactive',
+            });
+            processor = context.createScriptProcessor(bufferSize, 1, 1);
+            processor.connect(context.destination);
+            context.resume();
+
+            let handleSuccess = function (stream) {
+                const sampleRate = stream.getAudioTracks()[0].getSettings().sampleRate;
+                console.log(sampleRate);
+                globalStream = stream;
+                input = context.createMediaStreamSource(stream);
+                input.connect(processor);
+
+                processor.onaudioprocess = function (e) {
+                    let left = e.inputBuffer.getChannelData(0);
+                    let left16 = downsampleBuffer(left, 48000, 32000);
+                    websocket.send(left16);
+                };
+            };
+
+            navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(handleSuccess);
+        }
+
+        // 停止采集声音
+        function stopRecording() {
+            streamStreaming = false;
+
+            let track = globalStream.getTracks()[0];
+            track.stop();
+
+            input.disconnect(processor);
+            processor.disconnect(context.destination);
+            context.close().then(function () {
+                input = null;
+                processor = null;
+                context = null;
+                AudioContext = null;
+            });
+        }
+
+        // 初始化websocket
+        function initWebSocket() {
+            websocket = new WebSocket(websocket_url);
+            websocket.onopen = function () {
+                document.getElementById("webSocketStatus").innerHTML = '已连接';
+            };
+            websocket.onclose = function (e) {
+                document.getElementById("webSocketStatus").innerHTML = '未连接';
+            };
+            websocket.onmessage = function (e) {
+                e.data.arrayBuffer().then(buffer => {
+                    player.feed(new Int16Array(buffer));
+                });
+            };
+        }
+
+        function downsampleBuffer(buffer, sampleBuffer, outSampleRate) {
+            let sampleRateRatio = sampleRate / outSampleRate;
+            let newLength = Math.round(buffer.length / sampleRateRatio);
+            let result = new Int16Array(newLength);
+            let offsetResult = 0;
+            let offsetBuffer = 0;
+            while (offsetResult < result.length) {
+                let nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+                let accum = 0;
+                let count = 0;
+                for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+                    accum += buffer[i];
+                    count++;
+                }
+
+                result[offsetResult] = Math.min(1, accum / count) * 0x7FFF;
+                offsetResult++;
+                offsetBuffer = nextOffsetBuffer;
+            }
+
+            return result.buffer;
+        }
+    </script>
+
+    <body>
+        <button onclick='startRecording()'>开始采集声音</button>
+        <button onclick='stopRecording()'>停止采集声音</button>
+        <br />
+        <div>WebSocket: <span id="webSocketStatus">未连接</span></div>
+    </body>
+</html>
+```
