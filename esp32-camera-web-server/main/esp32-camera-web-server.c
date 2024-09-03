@@ -40,15 +40,16 @@ static esp_err_t init_camera(void) {
       .pin_href = CAM_PIN_HREF,
       .pin_pclk = CAM_PIN_PCLK,
 
-      .xclk_freq_hz = CONFIG_XCLK_FREQ,
+      .xclk_freq_hz = 10000000,
       .ledc_timer = LEDC_TIMER_0,
       .ledc_channel = LEDC_CHANNEL_0,
 
-      .pixel_format = PIXFORMAT_JPEG,
-      .frame_size = FRAMESIZE_VGA,
+      .pixel_format = PIXFORMAT_RGB565,
+      .frame_size = FRAMESIZE_240X240,
 
-      .jpeg_quality = 10,
+      .jpeg_quality = 12,
       .fb_count = 1,
+      .fb_location = CAMERA_FB_IN_PSRAM,
       .grab_mode = CAMERA_GRAB_WHEN_EMPTY}; // CAMERA_GRAB_LATEST. Sets when
                                             // buffers should be filled
   esp_err_t err = esp_camera_init(&camera_config);
@@ -69,12 +70,14 @@ esp_err_t jpg_stream_httpd_handler(httpd_req_t *req) {
     last_frame = esp_timer_get_time();
   }
 
+  // 设置响应内容为流媒体
   res = httpd_resp_set_type(req, _STREAM_CONTENT_TYPE);
   if (res != ESP_OK) {
     return res;
   }
 
   while (true) {
+    // 获取图片缓冲区
     fb = esp_camera_fb_get();
     if (!fb) {
       res = ESP_FAIL;
@@ -91,6 +94,7 @@ esp_err_t jpg_stream_httpd_handler(httpd_req_t *req) {
       _jpg_buf = fb->buf;
     }
 
+    // 分段将图片数据返回给浏览器
     if (res == ESP_OK) {
       res = httpd_resp_send_chunk(req, _STREAM_BOUNDARY,
                                   strlen(_STREAM_BOUNDARY));
@@ -125,10 +129,12 @@ httpd_uri_t uri_get = {.uri = "/",
                        .handler = jpg_stream_httpd_handler,
                        .user_ctx = NULL};
 httpd_handle_t setup_server(void) {
+  // 生成http server的默认配置
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   httpd_handle_t stream_httpd = NULL;
 
   if (httpd_start(&stream_httpd, &config) == ESP_OK) {
+    // 只注册一个uri的处理逻辑，就是"172.20.10.6:80/"的处理逻辑
     httpd_register_uri_handler(stream_httpd, &uri_get);
   }
 
@@ -149,11 +155,13 @@ void app_main() {
   connect_wifi();
 
   if (wifi_connect_status) {
+    // 初始化摄像头传感器
     err = init_camera();
     if (err != ESP_OK) {
       printf("err: %s\n", esp_err_to_name(err));
       return;
     }
+    // 启动web server
     setup_server();
   } else {
 

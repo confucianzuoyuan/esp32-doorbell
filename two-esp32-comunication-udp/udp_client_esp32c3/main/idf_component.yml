@@ -1,0 +1,11 @@
+dependencies:
+  idf: "^5.0"
+  espressif/es8311: "^1.0.0"
+  protocol_examples_tapif_io:
+    path: ${IDF_PATH}/examples/common_components/protocol_examples_tapif_io
+    rules:
+      - if: "target in [linux]"
+  protocol_examples_common:
+    path: ${IDF_PATH}/examples/common_components/protocol_examples_common
+    rules:
+      - if: "target not in [linux]"

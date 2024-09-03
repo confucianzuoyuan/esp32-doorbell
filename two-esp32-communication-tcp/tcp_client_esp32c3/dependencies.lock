@@ -1,0 +1,21 @@
+dependencies:
+  espressif/es8311:
+    component_hash: 46b3117250344bb03f143d5e2becf81cfb111679fbd7b95cefc2d302d36cc393
+    source:
+      service_url: https://api.components.espressif.com/
+      type: service
+    version: 1.0.0~1
+  idf:
+    component_hash: null
+    source:
+      type: idf
+    version: 5.3.0
+  protocol_examples_common:
+    component_hash: null
+    source:
+      path: /home/zuoyuan/esp/esp-idf/examples/common_components/protocol_examples_common
+      type: local
+    version: '*'
+manifest_hash: 77527fb41dca824c7a4d1b1e84e681c9060bfe7a911a5fdce823c9c5ed1446ef
+target: esp32c3
+version: 1.0.0
