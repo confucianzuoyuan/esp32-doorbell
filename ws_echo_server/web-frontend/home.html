@@ -1,0 +1,123 @@
+<html>
+    <head>
+        <script src='pcm-player.js'></script>
+    </head>
+    <script>
+        // websocket地址
+        // 填写的是esp32服务器的ip地址
+        let websocket_url = 'ws://172.20.10.6:80/ws';
+        let bufferSize = 8192,
+            AudioContext,
+            context,
+            processor,
+            input,
+            globalStream,
+            websocket;
+
+        // 初始化浏览器的websocket
+        initWebSocket();
+
+        // 初始化播放器
+        let player = new PCMPlayer({
+            encoding: '16bitInt',
+            channels: 1,
+            // esp32以16000Hz采集声音，浏览器以32000Hz播放声音
+            sampleRate: 32000,
+            flushingTime: 2000
+        });
+
+        // 通过浏览器的麦克风api采集声音
+        function startRecording() {
+            streamStreaming = true;
+            AudioContext = window.AudioContext || window.webkitAudioContext;
+            context = new AudioContext({
+                latencyHint: 'interactive',
+            });
+            processor = context.createScriptProcessor(bufferSize, 1, 1);
+            processor.connect(context.destination);
+            context.resume();
+
+            let handleSuccess = function (stream) {
+                const sampleRate = stream.getAudioTracks()[0].getSettings().sampleRate;
+                console.log(sampleRate);
+                globalStream = stream;
+                input = context.createMediaStreamSource(stream);
+                input.connect(processor);
+
+                processor.onaudioprocess = function (e) {
+                    // 以48000Hz采集声音数据
+                    let left = e.inputBuffer.getChannelData(0);
+                    // 降采样为32000Hz的声音数据
+                    let left16 = downsampleBuffer(left, 48000, 32000);
+                    // 将声音数据通过websocket发送给esp32
+                    websocket.send(left16);
+                };
+            };
+
+            navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(handleSuccess);
+        }
+
+        // 停止采集声音
+        function stopRecording() {
+            streamStreaming = false;
+
+            let track = globalStream.getTracks()[0];
+            track.stop();
+
+            input.disconnect(processor);
+            processor.disconnect(context.destination);
+            context.close().then(function () {
+                input = null;
+                processor = null;
+                context = null;
+                AudioContext = null;
+            });
+        }
+
+        // 初始化websocket
+        function initWebSocket() {
+            websocket = new WebSocket(websocket_url);
+            websocket.onopen = function () {
+                document.getElementById("webSocketStatus").innerHTML = '已连接';
+            };
+            websocket.onclose = function (e) {
+                document.getElementById("webSocketStatus").innerHTML = '未连接';
+            };
+            websocket.onmessage = function (e) {
+                e.data.arrayBuffer().then(buffer => {
+                    player.feed(new Int16Array(buffer));
+                });
+            };
+        }
+
+        function downsampleBuffer(buffer, sampleRate, outSampleRate) {
+            let sampleRateRatio = sampleRate / outSampleRate;
+            let newLength = Math.round(buffer.length / sampleRateRatio);
+            let result = new Int16Array(newLength);
+            let offsetResult = 0;
+            let offsetBuffer = 0;
+            while (offsetResult < result.length) {
+                let nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+                let accum = 0;
+                let count = 0;
+                for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+                    accum += buffer[i];
+                    count++;
+                }
+
+                result[offsetResult] = Math.min(1, accum / count) * 0x7FFF;
+                offsetResult++;
+                offsetBuffer = nextOffsetBuffer;
+            }
+
+            return result.buffer;
+        }
+    </script>
+
+    <body>
+        <button onclick='startRecording()'>开始采集声音</button>
+        <button onclick='stopRecording()'>停止采集声音</button>
+        <br />
+        <div>WebSocket: <span id="webSocketStatus">未连接</span></div>
+    </body>
+</html>

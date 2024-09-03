@@ -1,0 +1,9 @@
+{
+    "C_Cpp.default.compilerPath": "/usr/bin/gcc",
+    "files.associations": {
+        "*.h": "c",
+        "cstring": "c",
+        "variant": "c",
+        "*.inc": "c"
+    }
+}

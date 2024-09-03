@@ -558,6 +558,7 @@ PCMPlayer.prototype.flush = function() {
     </head>
     <script>
         // websocket地址
+        // 填写的是esp32服务器的ip地址
         let websocket_url = 'ws://172.20.10.5:80/ws';
         let bufferSize = 8192,
             AudioContext,
@@ -570,9 +571,11 @@ PCMPlayer.prototype.flush = function() {
         // 初始化浏览器的websocket
         initWebSocket();
 
+        // 初始化播放器
         let player = new PCMPlayer({
             encoding: '16bitInt',
             channels: 1,
+            // esp32以16000Hz采集声音，浏览器以32000Hz播放声音
             sampleRate: 32000,
             flushingTime: 2000
         });
@@ -596,8 +599,11 @@ PCMPlayer.prototype.flush = function() {
                 input.connect(processor);
 
                 processor.onaudioprocess = function (e) {
+                    // 以48000Hz采集声音数据
                     let left = e.inputBuffer.getChannelData(0);
+                    // 降采样为32000Hz的声音数据
                     let left16 = downsampleBuffer(left, 48000, 32000);
+                    // 将声音数据通过websocket发送给esp32
                     websocket.send(left16);
                 };
             };
